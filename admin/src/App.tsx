@@ -6,6 +6,7 @@ import { UsersPage } from './pages/UsersPage';
 import { ChannelsPage } from './pages/ChannelsPage';
 import { SubscriptionsPage } from './pages/SubscriptionsPage';
 import { PostsPage } from './pages/PostsPage';
+import { UserbotPage } from './pages/UserbotPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +28,7 @@ function App() {
             <Route path="channels" element={<ChannelsPage />} />
             <Route path="subscriptions" element={<SubscriptionsPage />} />
             <Route path="posts" element={<PostsPage />} />
+            <Route path="userbot" element={<UserbotPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

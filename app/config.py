@@ -4,11 +4,19 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # Telegram
+    # Telegram Bot
     bot_token: str = os.getenv("BOT_TOKEN", "")
+
+    # Telegram MTProto (for userbot)
+    # Get from https://my.telegram.org/apps
+    telegram_api_id: str = os.getenv("TELEGRAM_API_ID", "")
+    telegram_api_hash: str = os.getenv("TELEGRAM_API_HASH", "")
 
     # Gemini
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+
+    # OpenAI (for Whisper)
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
     # Database
     database_url: str = os.getenv("DATABASE_URL", "")

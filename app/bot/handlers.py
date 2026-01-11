@@ -11,6 +11,7 @@ from app.db.models import User, Channel, Subscription
 from app.services.parser import ChannelParser
 from app.services.summarizer import Summarizer
 from app.services.transcription import TranscriptionService
+from app.services.userbot import get_userbot_service, AuthState
 
 import telegramify_markdown
 from telegramify_markdown import customize
@@ -157,15 +158,130 @@ async def cmd_channels(message: types.Message):
         await message.answer(formatted, parse_mode=ParseMode.MARKDOWN_V2)
 
 
-@router.message(Command("remove"))
-async def cmd_remove(message: types.Message):
-    """Отписка от канала"""
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("Использование: /remove @channelname")
+@router.message(Command("add"))
+async def cmd_add(message: types.Message):
+    """Добавление каналов по username (можно несколько через пробел)"""
+    args = message.text.split()[1:]  # Убираем /add
+    if not args:
+        await message.answer("Использование: /add @channel1 @channel2 @channel3")
         return
 
-    channel_username = args[1].replace("@", "").strip()
+    # Парсим каналы из аргументов
+    channels_to_add = []
+    for arg in args:
+        # Убираем @ и лишние символы
+        username = arg.replace("@", "").strip().lower()
+        if username and username not in channels_to_add:
+            channels_to_add.append(username)
+
+    if not channels_to_add:
+        await message.answer("Не найдено каналов для добавления")
+        return
+
+    await message.answer(f"Добавляю {len(channels_to_add)} каналов...")
+
+    added = []
+    already_exists = []
+    failed = []
+
+    async with get_async_session()() as session:
+        # Получаем или создаём пользователя
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )
+        user = user_result.scalar_one_or_none()
+
+        if not user:
+            user = User(
+                telegram_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+            )
+            session.add(user)
+            await session.flush()
+
+        for channel_username in channels_to_add:
+            try:
+                # Проверяем доступность канала
+                is_public = await get_parser().is_channel_public(channel_username)
+                if not is_public:
+                    failed.append(f"@{channel_username} (недоступен)")
+                    continue
+
+                # Получаем или создаём канал
+                channel_result = await session.execute(
+                    select(Channel).where(Channel.username == channel_username)
+                )
+                channel = channel_result.scalar_one_or_none()
+
+                # Получаем ID последнего поста
+                latest_post_id = 0
+                try:
+                    posts = await get_parser().get_posts(channel_username, 0)
+                    if posts:
+                        latest_post_id = max(p.post_id for p in posts)
+                except Exception as e:
+                    logger.warning(f"Could not get latest post for @{channel_username}: {e}")
+
+                if not channel:
+                    info = await get_parser().get_channel_info(channel_username)
+                    channel = Channel(
+                        username=channel_username,
+                        title=info.title if info else channel_username,
+                        last_post_id=latest_post_id,
+                    )
+                    session.add(channel)
+                    await session.flush()
+                    logger.info(f"Created channel @{channel_username} (last_post_id={latest_post_id})")
+                else:
+                    # Обновляем last_post_id для существующего канала
+                    if latest_post_id > 0:
+                        channel.last_post_id = latest_post_id
+                        logger.info(f"Updated @{channel_username} last_post_id={latest_post_id}")
+
+                # Проверяем подписку
+                sub_result = await session.execute(
+                    select(Subscription).where(
+                        Subscription.user_id == user.id,
+                        Subscription.channel_id == channel.id
+                    )
+                )
+                if sub_result.scalar_one_or_none():
+                    already_exists.append(f"@{channel_username}")
+                    continue
+
+                # Создаём подписку
+                subscription = Subscription(user_id=user.id, channel_id=channel.id)
+                session.add(subscription)
+                added.append(f"@{channel_username}")
+
+            except Exception as e:
+                logger.error(f"Error adding channel @{channel_username}: {e}")
+                failed.append(f"@{channel_username} (ошибка)")
+
+        await session.commit()
+
+    # Формируем ответ
+    result_parts = []
+    if added:
+        result_parts.append(f"✅ Добавлено: {', '.join(added)}")
+    if already_exists:
+        result_parts.append(f"ℹ️ Уже есть: {', '.join(already_exists)}")
+    if failed:
+        result_parts.append(f"❌ Ошибка: {', '.join(failed)}")
+
+    await message.answer("\n".join(result_parts) or "Ничего не добавлено")
+
+
+@router.message(Command("remove"))
+async def cmd_remove(message: types.Message):
+    """Отписка от канала или от всех каналов"""
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("Использование:\n/remove @channelname — отписаться от канала\n/remove all — отписаться от всех")
+        return
+
+    arg = args[1].strip().lower()
 
     async with get_async_session()() as session:
         # Находим пользователя
@@ -176,6 +292,28 @@ async def cmd_remove(message: types.Message):
         if not user:
             await message.answer("Ошибка: пользователь не найден")
             return
+
+        # Удаление всех подписок
+        if arg == "all":
+            sub_result = await session.execute(
+                select(Subscription).where(Subscription.user_id == user.id)
+            )
+            subscriptions = sub_result.scalars().all()
+
+            if not subscriptions:
+                await message.answer("У тебя нет подписок")
+                return
+
+            count = len(subscriptions)
+            for sub in subscriptions:
+                await session.delete(sub)
+            await session.commit()
+
+            await message.answer(f"✅ Удалено {count} подписок")
+            return
+
+        # Удаление одной подписки
+        channel_username = arg.replace("@", "")
 
         # Находим канал
         channel_result = await session.execute(
@@ -203,6 +341,26 @@ async def cmd_remove(message: types.Message):
         await session.commit()
 
         await message.answer(f"✅ Отписался от @{channel_username}")
+
+
+@router.message(Command("refresh"))
+async def cmd_refresh(message: types.Message):
+    """Принудительная проверка каналов"""
+    from app.services.scheduler import get_scheduler
+
+    scheduler = get_scheduler()
+    if not scheduler:
+        await message.answer("❌ Scheduler не запущен")
+        return
+
+    await message.answer("🔄 Запускаю проверку каналов...")
+
+    try:
+        await scheduler._check_channels()
+        await message.answer("✅ Проверка завершена")
+    except Exception as e:
+        logger.error(f"Refresh error: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
 
 
 @router.message(Command("stats"))
@@ -334,13 +492,18 @@ async def handle_forwarded_channel_message(message: types.Message):
             # Получаем информацию о канале
             info = await get_parser().get_channel_info(channel_username)
 
+            # Используем ID пересланного поста как стартовую точку
+            # Чтобы не обрабатывать старые посты
+            forwarded_post_id = message.forward_from_message_id or 0
+
             channel = Channel(
                 username=channel_username,
                 title=info.title if info else message.forward_from_chat.title,
+                last_post_id=forwarded_post_id,  # Начинаем с текущего поста
             )
             session.add(channel)
             await session.flush()
-            logger.info(f"Created new channel: @{channel_username}")
+            logger.info(f"Created new channel: @{channel_username} (starting from post {forwarded_post_id})")
 
         # Проверяем, есть ли уже подписка
         sub_result = await session.execute(
@@ -361,11 +524,24 @@ async def handle_forwarded_channel_message(message: types.Message):
         await session.commit()
 
         title = channel.title or channel_username
-        await message.answer(
-            f"✅ Канал **@{channel_username}** добавлен в твой дайджест!\n\n"
-            f"Буду присылать резюме новых постов.",
-            parse_mode=ParseMode.MARKDOWN
-        )
+
+        # Проверяем, авторизован ли userbot (для полного парсинга медиа)
+        userbot_available = False
+        try:
+            userbot = get_userbot_service()
+            status = await userbot.get_status()
+            userbot_available = status.get("state") == AuthState.AUTHORIZED
+        except Exception:
+            pass
+
+        # Формируем ответ
+        response = f"✅ Канал **@{channel_username}** добавлен в твой дайджест!\n\n"
+        if userbot_available:
+            response += "Буду присылать резюме новых постов, включая голосовые и кружки."
+        else:
+            response += "Буду присылать резюме текстовых постов.\n\n_Голосовые из каналов пока недоступны._"
+
+        await message.answer(response, parse_mode=ParseMode.MARKDOWN)
 
         logger.info(f"User {message.from_user.id} subscribed to @{channel_username}")
 

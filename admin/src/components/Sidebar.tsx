@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, Radio, Bell, FileText, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Radio, Bell, FileText, LogOut, Bot } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -7,6 +7,7 @@ const navigation = [
   { name: 'Channels', href: '/channels', icon: Radio },
   { name: 'Subscriptions', href: '/subscriptions', icon: Bell },
   { name: 'Posts', href: '/posts', icon: FileText },
+  { name: 'Userbot', href: '/userbot', icon: Bot },
 ];
 
 export function Sidebar() {

@@ -21,6 +21,7 @@ from pyrogram.errors import (
     PasswordHashInvalid,
     FloodWait,
     BadRequest,
+    ChannelPrivate,
 )
 from sqlalchemy import select
 
@@ -505,6 +506,9 @@ class UserbotService:
 
             return None
 
+        except FloodWait as e:
+            logger.warning(f"FloodWait downloading from @{chat_username}: wait {e.value}s")
+            return None
         except Exception as e:
             logger.error(f"Download media error: {e}")
             return None
@@ -547,34 +551,66 @@ class UserbotService:
                     "has_audio": bool(message.audio),
                     "has_video": bool(message.video),
                     "has_photo": bool(message.photo),
+                    # Для альбомов (несколько фото/видео в одном посте)
+                    "media_group_id": message.media_group_id,
                 }
 
-                # Определяем тип медиа
+                # Собираем все типы медиа в посте
+                media_types = []
+
                 if message.voice:
-                    msg_data["media_type"] = "voice"
-                    msg_data["duration"] = message.voice.duration
-                elif message.video_note:
-                    msg_data["media_type"] = "video_note"
-                    msg_data["duration"] = message.video_note.duration
-                elif message.audio:
-                    msg_data["media_type"] = "audio"
-                    msg_data["duration"] = message.audio.duration
-                elif message.video:
-                    msg_data["media_type"] = "video"
-                    msg_data["duration"] = message.video.duration if message.video.duration else None
-                elif message.photo:
-                    msg_data["media_type"] = "photo"
+                    media_types.append("voice")
+                    msg_data["voice_duration"] = message.voice.duration
+                if message.video_note:
+                    media_types.append("video_note")
+                    msg_data["video_note_duration"] = message.video_note.duration
+                if message.audio:
+                    media_types.append("audio")
+                    msg_data["audio_duration"] = message.audio.duration
+                if message.video:
+                    media_types.append("video")
+                    msg_data["video_duration"] = message.video.duration if message.video.duration else None
+                if message.photo:
+                    media_types.append("photo")
+                    # Берём самое большое разрешение фото
+                    msg_data["photo_file_id"] = message.photo.file_id
+
+                # Для обратной совместимости - основной тип медиа
+                if media_types:
+                    msg_data["media_type"] = media_types[0]
+                    msg_data["all_media_types"] = media_types
                 else:
                     msg_data["media_type"] = "text"
+                    msg_data["all_media_types"] = []
 
                 messages.append(msg_data)
 
             logger.info(f"Got {len(messages)} messages from @{username}")
             return messages
 
+        except FloodWait as e:
+            # Telegram просит подождать - логируем и возвращаем пустой список
+            logger.warning(f"FloodWait for @{username}: need to wait {e.value} seconds")
+            return []
+        except ChannelPrivate:
+            logger.warning(f"Channel @{username} is private or inaccessible")
+            return []
         except Exception as e:
             logger.error(f"Get channel messages error: {e}")
             return []
+
+    async def download_photo(self, chat_username: str, message_id: int) -> Optional[bytes]:
+        """
+        Скачивает фото из сообщения канала.
+
+        Args:
+            chat_username: Username канала
+            message_id: ID сообщения
+
+        Returns:
+            bytes с данными фото или None
+        """
+        return await self.download_media(chat_username, message_id)
 
     async def logout(self) -> dict:
         """Выходит из аккаунта и удаляет сессию"""

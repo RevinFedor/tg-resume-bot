@@ -56,6 +56,28 @@ export interface Stats {
   total_posts: number;
 }
 
+// Userbot types
+export type UserbotState =
+  | 'not_started'
+  | 'waiting_code'
+  | 'waiting_password'
+  | 'authorized'
+  | 'error';
+
+export interface UserbotStatus {
+  configured: boolean;
+  state: UserbotState;
+  phone?: string;
+  message: string;
+}
+
+export interface UserbotResponse {
+  success: boolean;
+  state?: UserbotState;
+  message?: string;
+  error?: string;
+}
+
 // API functions
 export const getStats = () => api.get<Stats>('/api/stats');
 export const getUsers = () => api.get<User[]>('/api/users');
@@ -67,3 +89,15 @@ export const deleteUser = (id: number) => api.delete(`/api/users/${id}`);
 export const deleteChannel = (id: number) => api.delete(`/api/channels/${id}`);
 export const toggleChannel = (id: number, is_active: boolean) =>
   api.patch(`/api/channels/${id}`, { is_active });
+
+// Userbot API
+export const getUserbotStatus = () => api.get<UserbotStatus>('/api/userbot/status');
+export const startUserbotAuth = (phone_number: string) =>
+  api.post<UserbotResponse>('/api/userbot/start', { phone_number });
+export const confirmUserbotCode = (code: string) =>
+  api.post<UserbotResponse>('/api/userbot/code', { code });
+export const confirmUserbotPassword = (password: string) =>
+  api.post<UserbotResponse>('/api/userbot/password', { password });
+export const logoutUserbot = () => api.post<UserbotResponse>('/api/userbot/logout');
+export const joinUserbotChannel = (username: string) =>
+  api.post<UserbotResponse>('/api/userbot/join', { username });

@@ -62,9 +62,11 @@ async def lifespan(app: FastAPI):
     # Настройка хендлеров бота
     setup_handlers(dp)
 
-    # Запуск scheduler (каждые 30 секунд = 0.5 минуты)
+    # Запуск scheduler (каждые 30 секунд)
+    from app.services.scheduler import set_scheduler
     interval_seconds = int(os.getenv("CHECK_INTERVAL_SECONDS", "30"))
     scheduler = Scheduler(bot, interval_seconds=interval_seconds)
+    set_scheduler(scheduler)  # Сохраняем для доступа из команд
     await scheduler.start()
 
     # Настройка webhook
