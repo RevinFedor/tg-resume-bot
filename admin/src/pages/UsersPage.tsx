@@ -25,6 +25,19 @@ export function UsersPage() {
     { key: 'username', title: 'Username', render: (u: User) => u.username ? `@${u.username}` : '-' },
     { key: 'first_name', title: 'Name' },
     {
+      key: 'interests',
+      title: 'Interests 🔥',
+      render: (u: User) => (
+        u.interests ? (
+          <span className="text-orange-400 max-w-xs truncate block" title={u.interests}>
+            {u.interests.length > 30 ? u.interests.slice(0, 30) + '...' : u.interests}
+          </span>
+        ) : (
+          <span className="text-gray-500">-</span>
+        )
+      ),
+    },
+    {
       key: 'is_admin',
       title: 'Admin',
       render: (u: User) => (

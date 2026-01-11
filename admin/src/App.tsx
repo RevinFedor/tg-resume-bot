@@ -7,6 +7,7 @@ import { ChannelsPage } from './pages/ChannelsPage';
 import { SubscriptionsPage } from './pages/SubscriptionsPage';
 import { PostsPage } from './pages/PostsPage';
 import { UserbotPage } from './pages/UserbotPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,6 +30,7 @@ function App() {
             <Route path="subscriptions" element={<SubscriptionsPage />} />
             <Route path="posts" element={<PostsPage />} />
             <Route path="userbot" element={<UserbotPage />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

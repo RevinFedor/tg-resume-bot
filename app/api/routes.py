@@ -96,6 +96,7 @@ async def get_users(db: AsyncSession = Depends(get_db)):
             "username": u.username,
             "first_name": u.first_name,
             "is_admin": u.is_admin,
+            "interests": u.interests,
             "created_at": u.created_at.isoformat(),
         }
         for u in users

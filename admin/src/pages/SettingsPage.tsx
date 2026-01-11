@@ -14,9 +14,6 @@ import {
   updateAISettings,
   getAIStatus,
   getAvailableModels,
-  type AISettings,
-  type AIStatus,
-  type GeminiModel,
 } from '../api/client';
 
 // Рекомендуемые модели с хорошими лимитами
