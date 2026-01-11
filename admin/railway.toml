@@ -1,0 +1,8 @@
+[build]
+builder = "NIXPACKS"
+
+[build.nixpacksPlan]
+providers = ["node"]
+
+[deploy]
+startCommand = "npx serve dist -s -l 8080"
