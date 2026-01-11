@@ -12,6 +12,7 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    interests: Mapped[str | None] = mapped_column(Text, nullable=True)  # Интересы для маркировки важных постов
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -85,6 +86,19 @@ class Post(Base):
 
     def __repr__(self):
         return f"<Post channel={self.channel_id} post={self.post_id}>"
+
+
+class AppSettings(Base):
+    """Настройки приложения (key-value хранилище)"""
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<AppSettings {self.key}={self.value[:50]}>"
 
 
 class UserbotSession(Base):

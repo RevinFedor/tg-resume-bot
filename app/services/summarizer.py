@@ -6,6 +6,8 @@ import re
 import base64
 from typing import Optional
 
+from app.services.settings import get_current_model, get_setting
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,8 +22,22 @@ class Summarizer:
             raise ValueError("GEMINI_API_KEY not set")
 
         genai.configure(api_key=api_key)
-        # gemma-3-27b-it - 14,400 RPD (vs 20 у Gemini Flash)
-        self.model = genai.GenerativeModel("gemma-3-27b-it")
+        self._current_model_name: str | None = None
+        self.model = None
+        self._ensure_model()
+
+    def _ensure_model(self):
+        """Проверяет и обновляет модель если она изменилась в настройках"""
+        model_name = get_current_model()
+
+        if model_name != self._current_model_name:
+            logger.info(f"Switching to model: {model_name}")
+            self.model = genai.GenerativeModel(model_name)
+            self._current_model_name = model_name
+
+    def get_model_name(self) -> str:
+        """Возвращает имя текущей модели"""
+        return self._current_model_name or "unknown"
 
     async def summarize(self, text: str, channel_name: str | None = None) -> tuple[str, dict]:
         """
@@ -30,6 +46,7 @@ class Summarizer:
         Returns:
             tuple: (summary_text, usage_stats)
         """
+        self._ensure_model()  # Проверяем актуальность модели
         prompt = self._build_prompt(text, channel_name)
 
         for attempt in range(self.MAX_RETRIES):
@@ -128,6 +145,8 @@ class Summarizer:
 
 Посты:
 {combined_text}"""
+
+        self._ensure_model()
 
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -444,3 +463,50 @@ class Summarizer:
                 raise
 
         raise Exception(f"Multimodal summarize failed after {self.MAX_RETRIES} retries")
+
+    async def check_interests(self, summary: str, interests: str) -> bool:
+        """
+        Проверяет, соответствует ли резюме интересам пользователя.
+
+        Args:
+            summary: Резюме поста
+            interests: Описание интересов пользователя
+
+        Returns:
+            True если пост соответствует интересам
+        """
+        if not interests or not summary:
+            return False
+
+        prompt = f"""Определи, соответствует ли пост интересам пользователя.
+
+Интересы пользователя: {interests}
+
+Содержание поста:
+{summary}
+
+Ответь ТОЛЬКО одним словом: ДА или НЕТ
+- ДА — если пост явно связан с интересами пользователя
+- НЕТ — если пост не связан или связь слабая"""
+
+        try:
+            response = self.model.generate_content(prompt)
+
+            usage = response.usage_metadata
+            logger.debug(
+                f"[INTERESTS CHECK] Input: {usage.prompt_token_count} | "
+                f"Output: {usage.candidates_token_count}"
+            )
+
+            result = response.text.strip().upper() if response.text else ""
+
+            # Проверяем ответ
+            matches = "ДА" in result or "YES" in result
+
+            logger.info(f"[INTERESTS] Match: {matches} | Response: {result[:20]}")
+
+            return matches
+
+        except Exception as e:
+            logger.error(f"Interest check error: {e}")
+            return False  # При ошибке не помечаем как важное

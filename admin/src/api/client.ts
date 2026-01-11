@@ -101,3 +101,36 @@ export const confirmUserbotPassword = (password: string) =>
 export const logoutUserbot = () => api.post<UserbotResponse>('/api/userbot/logout');
 export const joinUserbotChannel = (username: string) =>
   api.post<UserbotResponse>('/api/userbot/join', { username });
+
+// AI Settings types
+export interface AISettings {
+  provider: 'gemini' | 'claude';
+  gemini_model: string;
+  claude_model: string;
+}
+
+export interface AIStatus {
+  provider: string;
+  model: string;
+  status: 'ok' | 'rate_limited' | 'error';
+  message?: string;
+}
+
+export interface GeminiModel {
+  name: string;
+  displayName: string;
+  inputTokenLimit: number;
+  outputTokenLimit: number;
+}
+
+export interface ModelsResponse {
+  models: GeminiModel[];
+  count: number;
+}
+
+// AI Settings API
+export const getAISettings = () => api.get<AISettings>('/api/ai/settings');
+export const updateAISettings = (settings: Partial<AISettings>) =>
+  api.put<AISettings>('/api/ai/settings', settings);
+export const getAIStatus = () => api.get<AIStatus>('/api/ai/status');
+export const getAvailableModels = () => api.get<ModelsResponse>('/api/ai/models');

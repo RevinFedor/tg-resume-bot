@@ -1,12 +1,18 @@
+import os
+import json
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
+from typing import Optional
 
 from app.db.database import get_async_session
 from app.db.models import User, Channel, Subscription, Post
 from app.services.userbot import get_userbot_service, AuthState
+from app.services import settings as app_settings
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -38,6 +44,20 @@ class UserbotPasswordRequest(BaseModel):
 
 class UserbotJoinChannelRequest(BaseModel):
     username: str
+
+
+# AI Settings models
+class AISettingsUpdate(BaseModel):
+    provider: Optional[str] = None  # gemini | claude
+    gemini_model: Optional[str] = None
+    claude_model: Optional[str] = None
+
+
+class AIStatusResponse(BaseModel):
+    provider: str
+    model: str
+    status: str  # ok | rate_limited | error
+    message: Optional[str] = None
 
 
 # Dependency
@@ -333,3 +353,139 @@ async def get_channel_messages_via_userbot(
         "messages": messages,
         "count": len(messages),
     }
+
+
+# =============================================================================
+# AI SETTINGS ENDPOINTS
+# =============================================================================
+
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def _probe_gemini_model(api_key: str, model: str) -> dict:
+    """Проверяет доступность модели Gemini"""
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+
+    payload = {
+        "contents": [{"parts": [{"text": "1"}]}],
+        "generationConfig": {"maxOutputTokens": 1}
+    }
+
+    try:
+        req = Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urlopen(req, timeout=15) as resp:
+            return {"status": "ok"}
+    except HTTPError as e:
+        if e.code == 429:
+            return {"status": "rate_limited", "message": "Лимит исчерпан"}
+        else:
+            error_body = e.read().decode()
+            return {"status": "error", "message": f"Error {e.code}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/ai/settings")
+async def get_ai_settings():
+    """Получить текущие настройки AI"""
+    settings = await app_settings.get_ai_settings()
+    return settings
+
+
+@router.put("/ai/settings")
+async def update_ai_settings(data: AISettingsUpdate):
+    """Обновить настройки AI"""
+    if data.provider is not None:
+        if data.provider not in ("gemini", "claude"):
+            raise HTTPException(status_code=400, detail="Invalid provider. Use 'gemini' or 'claude'")
+        await app_settings.set_setting("ai_provider", data.provider)
+
+    if data.gemini_model is not None:
+        await app_settings.set_setting("gemini_model", data.gemini_model)
+
+    if data.claude_model is not None:
+        await app_settings.set_setting("claude_model", data.claude_model)
+
+    return await app_settings.get_ai_settings()
+
+
+@router.get("/ai/status")
+async def get_ai_status():
+    """
+    Проверяет статус текущей AI модели.
+
+    Делает минимальный probe запрос чтобы определить:
+    - ok: модель работает
+    - rate_limited: лимит исчерпан
+    - error: ошибка
+    """
+    settings = await app_settings.get_ai_settings()
+    provider = settings["provider"]
+
+    if provider == "gemini":
+        model = settings["gemini_model"]
+        api_key = os.getenv("GEMINI_API_KEY", "")
+
+        if not api_key:
+            return AIStatusResponse(
+                provider=provider,
+                model=model,
+                status="error",
+                message="GEMINI_API_KEY не настроен"
+            )
+
+        result = _probe_gemini_model(api_key, model)
+
+        return AIStatusResponse(
+            provider=provider,
+            model=model,
+            status=result["status"],
+            message=result.get("message")
+        )
+    else:
+        # Claude - пока не реализовано
+        return AIStatusResponse(
+            provider=provider,
+            model=settings["claude_model"],
+            status="ok",
+            message="Claude проверка не реализована"
+        )
+
+
+@router.get("/ai/models")
+async def get_available_models():
+    """
+    Получить список доступных моделей Gemini.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "")
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="GEMINI_API_KEY не настроен")
+
+    try:
+        url = f"{GEMINI_BASE_URL}/models?key={api_key}"
+        req = Request(url)
+        with urlopen(req, timeout=15) as resp:
+            data = json.load(resp)
+
+        models = []
+        for m in data.get("models", []):
+            if "generateContent" in m.get("supportedGenerationMethods", []):
+                models.append({
+                    "name": m.get("name", "").replace("models/", ""),
+                    "displayName": m.get("displayName", ""),
+                    "inputTokenLimit": m.get("inputTokenLimit"),
+                    "outputTokenLimit": m.get("outputTokenLimit"),
+                })
+
+        return {
+            "models": models,
+            "count": len(models)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

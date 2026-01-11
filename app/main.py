@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Update
+from aiogram.types import Update, BotCommand
 
 # Настройка логирования
 logging.basicConfig(
@@ -85,6 +85,19 @@ async def lifespan(app: FastAPI):
         # Fallback на polling если нет URL
         logger.warning("No WEBHOOK_URL, starting polling...")
         polling_task = asyncio.create_task(dp.start_polling(bot))
+
+    # Устанавливаем команды бота (подсказки при вводе /)
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Начать работу с ботом"),
+        BotCommand(command="help", description="Справка по командам"),
+        BotCommand(command="channels", description="Мои каналы"),
+        BotCommand(command="add", description="Добавить каналы (@ch1 @ch2)"),
+        BotCommand(command="remove", description="Отписаться от канала"),
+        BotCommand(command="interests", description="Интересы для маркировки постов 🔥"),
+        BotCommand(command="refresh", description="Проверить каналы сейчас"),
+        BotCommand(command="stats", description="Статистика"),
+    ])
+    logger.info("Bot commands registered")
 
     yield
 

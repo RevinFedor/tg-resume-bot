@@ -87,14 +87,18 @@ async def cmd_start(message: types.Message):
     text = """**Привет! Я бот для создания резюме постов из Telegram-каналов.**
 
 **Как пользоваться:**
-1. Перешли мне любое сообщение из публичного канала
-2. Я добавлю этот канал в твой дайджест
-3. Когда появятся новые посты — пришлю тебе резюме
+1. Перешли мне сообщение из публичного канала
+2. Я добавлю его в твой дайджест
+3. Новые посты → AI резюме тебе в чат
 
-**Команды:**
-/channels — список твоих каналов
-/remove @channel — отписаться от канала
-/help — справка"""
+**Ключевые команды:**
+/channels — твои каналы
+/interests — задать интересы (важные посты отмечу 🔥)
+/help — все команды
+
+**Пример интересов:**
+`/interests криптовалюты, AI, стартапы`
+→ посты на эти темы будут выделены 🔥🔥🔥"""
 
     formatted = telegramify_markdown.markdownify(text)
     await message.answer(formatted, parse_mode=ParseMode.MARKDOWN_V2)
@@ -110,8 +114,15 @@ async def cmd_help(message: types.Message):
 
 **Команды:**
 /channels — показать все твои каналы
+/add @ch1 @ch2 — добавить каналы
 /remove @channelname — отписаться от канала
+/interests — задать интересы для маркировки важных постов 🔥
 /stats — статистика
+/refresh — принудительная проверка
+
+**Интересы:**
+Укажи темы, которые тебе интересны, и посты по этим темам будут отмечены 🔥🔥🔥
+Пример: `/interests криптовалюты, AI, стартапы`
 
 **Как это работает:**
 Бот проверяет каналы каждые 5 минут. Когда появляется новый пост, создаётся краткое резюме с помощью AI и отправляется тебе."""
@@ -394,6 +405,73 @@ async def cmd_stats(message: types.Message):
 
         formatted = telegramify_markdown.markdownify(text)
         await message.answer(formatted, parse_mode=ParseMode.MARKDOWN_V2)
+
+
+@router.message(Command("interests"))
+async def cmd_interests(message: types.Message):
+    """Установка интересов для маркировки важных постов"""
+    args = message.text.split(maxsplit=1)
+
+    async with get_async_session()() as session:
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )
+        user = user_result.scalar_one_or_none()
+
+        if not user:
+            user = User(
+                telegram_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+            )
+            session.add(user)
+            await session.flush()
+
+        # Без аргументов — показываем текущие интересы
+        if len(args) < 2:
+            if user.interests:
+                text = f"""**Твои интересы:**
+{user.interests}
+
+Посты по этим темам будут отмечены 🔥
+
+**Изменить:** `/interests новые интересы`
+**Очистить:** `/interests clear`"""
+            else:
+                text = """**Интересы не заданы**
+
+Укажи свои интересы, и посты по этим темам будут выделены 🔥
+
+**Пример:**
+`/interests криптовалюты, AI, стартапы, инвестиции`"""
+
+            formatted = telegramify_markdown.markdownify(text)
+            await message.answer(formatted, parse_mode=ParseMode.MARKDOWN_V2)
+            return
+
+        new_interests = args[1].strip()
+
+        # Очистка интересов
+        if new_interests.lower() == "clear":
+            user.interests = None
+            await session.commit()
+            await message.answer("✅ Интересы очищены. Маркировка постов отключена.")
+            return
+
+        # Установка новых интересов
+        user.interests = new_interests
+        await session.commit()
+
+        text = f"""✅ **Интересы обновлены!**
+
+{new_interests}
+
+Теперь посты по этим темам будут отмечены 🔥"""
+
+        formatted = telegramify_markdown.markdownify(text)
+        await message.answer(formatted, parse_mode=ParseMode.MARKDOWN_V2)
+
+        logger.info(f"User {message.from_user.id} set interests: {new_interests[:50]}...")
 
 
 @router.message()

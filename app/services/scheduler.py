@@ -178,7 +178,8 @@ class Scheduler:
                         subscription.user.telegram_id,
                         channel.username,
                         summary,
-                        post.post_id
+                        post.post_id,
+                        user_interests=subscription.user.interests
                     )
                 except Exception as e:
                     logger.error(f"Failed to send to user {subscription.user.telegram_id}: {e}")
@@ -354,7 +355,8 @@ class Scheduler:
                     subscription.user.telegram_id,
                     channel.username,
                     summary,
-                    msg_id
+                    msg_id,
+                    user_interests=subscription.user.interests
                 )
             except Exception as e:
                 logger.error(f"Failed to send to user {subscription.user.telegram_id}: {e}")
@@ -365,21 +367,38 @@ class Scheduler:
         channel: str,
         summary: str,
         post_id: int,
-        type_label: str = ""
+        type_label: str = "",
+        user_interests: str | None = None
     ):
-        """Отправляет резюме пользователю"""
+        """Отправляет резюме пользователю с маркировкой по интересам"""
         import telegramify_markdown
         from telegramify_markdown import customize
         from aiogram.enums import ParseMode
 
         customize.strict_markdown = False
 
-        # Формируем сообщение без дублирования канала
-        # Канал указан в ссылке внизу
+        # Проверяем соответствие интересам
+        is_interesting = False
+        if user_interests:
+            try:
+                is_interesting = await self.summarizer.check_interests(summary, user_interests)
+                # Небольшая задержка после проверки (rate limit)
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"Interest check failed: {e}")
+
+        # Формируем маркер для важных постов
+        # 🔥 — яркий маркер, хорошо виден при скролле
+        interest_marker = ""
+        if is_interesting:
+            interest_marker = "🔥🔥🔥 **ПО ТВОИМ ИНТЕРЕСАМ** 🔥🔥🔥\n\n"
+            logger.info(f"[MARKER] Post matches interests for user {telegram_id}")
+
+        # Формируем сообщение
         if type_label:
-            message = f"**{type_label.strip()}**\n\n{summary}\n\n[Открыть в @{channel} →](https://t.me/{channel}/{post_id})"
+            message = f"{interest_marker}**{type_label.strip()}**\n\n{summary}\n\n[Открыть в @{channel} →](https://t.me/{channel}/{post_id})"
         else:
-            message = f"{summary}\n\n[Открыть в @{channel} →](https://t.me/{channel}/{post_id})"
+            message = f"{interest_marker}{summary}\n\n[Открыть в @{channel} →](https://t.me/{channel}/{post_id})"
 
         try:
             formatted = telegramify_markdown.markdownify(message)
@@ -392,8 +411,9 @@ class Scheduler:
         except Exception as e:
             # Fallback без форматирования
             logger.warning(f"Markdown formatting failed, sending plain text: {e}")
+            plain_marker = "🔥🔥🔥 ПО ТВОИМ ИНТЕРЕСАМ 🔥🔥🔥\n\n" if is_interesting else ""
             if type_label:
-                plain_message = f"{type_label.strip()}\n\n{summary}\n\nОткрыть в @{channel}: https://t.me/{channel}/{post_id}"
+                plain_message = f"{plain_marker}{type_label.strip()}\n\n{summary}\n\nОткрыть в @{channel}: https://t.me/{channel}/{post_id}"
             else:
-                plain_message = f"{summary}\n\nОткрыть в @{channel}: https://t.me/{channel}/{post_id}"
+                plain_message = f"{plain_marker}{summary}\n\nОткрыть в @{channel}: https://t.me/{channel}/{post_id}"
             await self.bot.send_message(telegram_id, plain_message)
