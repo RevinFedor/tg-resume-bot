@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from app.db.database import get_async_session
 from app.db.models import User, Channel, Subscription, Post
+from app.services.userbot import get_userbot_service, AuthState
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -20,6 +21,23 @@ class StatsResponse(BaseModel):
 
 class ChannelUpdate(BaseModel):
     is_active: bool | None = None
+
+
+# Userbot models
+class UserbotPhoneRequest(BaseModel):
+    phone_number: str
+
+
+class UserbotCodeRequest(BaseModel):
+    code: str
+
+
+class UserbotPasswordRequest(BaseModel):
+    password: str
+
+
+class UserbotJoinChannelRequest(BaseModel):
+    username: str
 
 
 # Dependency
@@ -186,3 +204,132 @@ async def get_posts(limit: int = 50, db: AsyncSession = Depends(get_db)):
         }
         for p in posts
     ]
+
+
+# =============================================================================
+# USERBOT ENDPOINTS
+# =============================================================================
+
+@router.get("/userbot/status")
+async def get_userbot_status():
+    """
+    Получить статус userbot.
+
+    Возвращает:
+    - configured: настроены ли API credentials
+    - state: текущее состояние авторизации
+    - phone: номер телефона (если авторизован)
+    - message: описание текущего состояния
+    """
+    userbot = get_userbot_service()
+    return await userbot.get_status()
+
+
+@router.post("/userbot/start")
+async def start_userbot_auth(data: UserbotPhoneRequest):
+    """
+    Начать авторизацию userbot.
+
+    Отправляет код подтверждения на указанный номер телефона.
+
+    Args:
+        phone_number: Номер в международном формате (+7...)
+    """
+    userbot = get_userbot_service()
+    result = await userbot.start_auth(data.phone_number)
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+
+    return result
+
+
+@router.post("/userbot/code")
+async def confirm_userbot_code(data: UserbotCodeRequest):
+    """
+    Подтвердить код из Telegram.
+
+    Args:
+        code: 5-значный код из SMS или Telegram
+    """
+    userbot = get_userbot_service()
+    result = await userbot.confirm_code(data.code)
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+
+    return result
+
+
+@router.post("/userbot/password")
+async def confirm_userbot_password(data: UserbotPasswordRequest):
+    """
+    Подтвердить пароль 2FA.
+
+    Args:
+        password: Пароль двухфакторной аутентификации
+    """
+    userbot = get_userbot_service()
+    result = await userbot.confirm_password(data.password)
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+
+    return result
+
+
+@router.post("/userbot/logout")
+async def logout_userbot():
+    """Выйти из аккаунта userbot"""
+    userbot = get_userbot_service()
+    result = await userbot.logout()
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+
+    return result
+
+
+@router.post("/userbot/join")
+async def userbot_join_channel(data: UserbotJoinChannelRequest):
+    """
+    Подписать userbot на канал.
+
+    Это нужно для получения голосовых и видео из канала.
+
+    Args:
+        username: Username канала (без @)
+    """
+    userbot = get_userbot_service()
+    result = await userbot.join_channel(data.username)
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+
+    return result
+
+
+@router.get("/userbot/channels/{username}/messages")
+async def get_channel_messages_via_userbot(
+    username: str,
+    after_id: int = 0,
+    limit: int = 10,
+):
+    """
+    Получить сообщения из канала через userbot.
+
+    Позволяет получать информацию о голосовых и видео.
+
+    Args:
+        username: Username канала
+        after_id: Получать сообщения после этого ID
+        limit: Максимальное количество сообщений
+    """
+    userbot = get_userbot_service()
+    messages = await userbot.get_channel_messages(username, after_id, limit)
+
+    return {
+        "channel": username,
+        "messages": messages,
+        "count": len(messages),
+    }

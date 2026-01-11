@@ -372,19 +372,24 @@ async def handle_forwarded_channel_message(message: types.Message):
 
 async def handle_voice_message(message: types.Message):
     """Обрабатывает голосовое сообщение"""
+    logger.info(f"[VOICE] Processing voice from user {message.from_user.id}")
     await message.bot.send_chat_action(message.chat.id, "typing")
 
     try:
         # Скачиваем файл
+        logger.info(f"[VOICE] Downloading file {message.voice.file_id}")
         file = await message.bot.get_file(message.voice.file_id)
         file_data = await message.bot.download_file(file.file_path)
+        logger.info(f"[VOICE] Downloaded, size: {len(file_data.getvalue())} bytes")
 
         # Транскрибируем
         await message.answer("🎤 Транскрибирую голосовое...")
+        logger.info("[VOICE] Starting transcription...")
         transcript = await get_transcriber().transcribe_bytes(
             file_data.read(),
             filename="voice.ogg"
         )
+        logger.info(f"[VOICE] Transcription done: {len(transcript) if transcript else 0} chars")
 
         if not transcript or len(transcript.strip()) < 10:
             await message.answer("Не удалось распознать речь в голосовом сообщении.")

@@ -30,3 +30,7 @@ pydantic-settings>=2.1.0
 
 # Session middleware
 itsdangerous>=2.1.0
+
+# Userbot (MTProto client for full media access)
+pyrogram>=2.0.0
+tgcrypto>=1.2.0

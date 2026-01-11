@@ -85,3 +85,20 @@ class Post(Base):
 
     def __repr__(self):
         return f"<Post channel={self.channel_id} post={self.post_id}>"
+
+
+class UserbotSession(Base):
+    """Хранит сессию Pyrogram userbot для парсинга медиа из каналов"""
+    __tablename__ = "userbot_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    session_string: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_authorized: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    phone_code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<UserbotSession {self.phone_number} authorized={self.is_authorized}>"

@@ -4,11 +4,12 @@ import os
 import sys
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import Update
 
 # Настройка логирования
 logging.basicConfig(
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 bot: Bot | None = None
 dp: Dispatcher | None = None
 scheduler = None
+
+# Webhook path
+WEBHOOK_PATH = "/webhook"
 
 
 @asynccontextmanager
@@ -58,14 +62,27 @@ async def lifespan(app: FastAPI):
     # Настройка хендлеров бота
     setup_handlers(dp)
 
-    # Запуск scheduler
-    interval = int(os.getenv("CHECK_INTERVAL_MINUTES", "5"))
-    scheduler = Scheduler(bot, interval_minutes=interval)
+    # Запуск scheduler (каждые 30 секунд = 0.5 минуты)
+    interval_seconds = int(os.getenv("CHECK_INTERVAL_SECONDS", "30"))
+    scheduler = Scheduler(bot, interval_seconds=interval_seconds)
     await scheduler.start()
 
-    # Запуск polling в фоне
-    polling_task = asyncio.create_task(dp.start_polling(bot))
-    logger.info("Bot polling started")
+    # Настройка webhook
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL") or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    if WEBHOOK_URL:
+        if not WEBHOOK_URL.startswith("http"):
+            WEBHOOK_URL = f"https://{WEBHOOK_URL}"
+        webhook_full_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+
+        await bot.set_webhook(
+            url=webhook_full_url,
+            drop_pending_updates=False,  # Не терять сообщения!
+        )
+        logger.info(f"Webhook set: {webhook_full_url}")
+    else:
+        # Fallback на polling если нет URL
+        logger.warning("No WEBHOOK_URL, starting polling...")
+        polling_task = asyncio.create_task(dp.start_polling(bot))
 
     yield
 
@@ -75,11 +92,9 @@ async def lifespan(app: FastAPI):
     if scheduler:
         await scheduler.stop()
 
-    polling_task.cancel()
-    try:
-        await polling_task
-    except asyncio.CancelledError:
-        pass
+    # Удаляем webhook при остановке
+    if WEBHOOK_URL:
+        await bot.delete_webhook()
 
     await bot.session.close()
     logger.info("Application stopped")
@@ -111,12 +126,54 @@ from app.api import router as api_router
 app.include_router(api_router)
 
 
+@app.post(WEBHOOK_PATH)
+async def webhook_handler(request: Request):
+    """Обработчик webhook от Telegram"""
+    try:
+        data = await request.json()
+
+        # Логируем ВСЕ входящие сообщения
+        logger.info(f"[WEBHOOK] Received update: {data.get('update_id')}")
+
+        if 'message' in data:
+            msg = data['message']
+            msg_type = "unknown"
+            if msg.get('text'):
+                msg_type = "text"
+            elif msg.get('voice'):
+                msg_type = "voice"
+            elif msg.get('video_note'):
+                msg_type = "video_note"
+            elif msg.get('audio'):
+                msg_type = "audio"
+            elif msg.get('photo'):
+                msg_type = "photo"
+            elif msg.get('forward_from_chat'):
+                msg_type = "forwarded"
+
+            from_user = msg.get('from', {})
+            logger.info(
+                f"[WEBHOOK] Message type={msg_type} "
+                f"from={from_user.get('id')} "
+                f"(@{from_user.get('username', 'no_username')})"
+            )
+
+        update = Update(**data)
+        await dp.feed_update(bot, update)
+
+    except Exception as e:
+        logger.error(f"[WEBHOOK] Error processing update: {e}", exc_info=True)
+
+    return {"ok": True}
+
+
 @app.get("/")
 async def root():
     return {
         "status": "ok",
         "bot": "@chanresume_bot",
         "admin": "/admin",
+        "webhook": WEBHOOK_PATH,
     }
 
 
