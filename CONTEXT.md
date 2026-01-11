@@ -293,21 +293,134 @@ curl $API/api/userbot/status
 
 ---
 
-## Полезные команды
+## Railway: Деплой через CLI
+
+**ВАЖНО:** GitHub НЕ подключен к Railway. Деплой только через CLI!
+
+### Два сервиса (разные Root Directory)
+
+| Сервис | Root Directory | Команда деплоя |
+|--------|----------------|----------------|
+| `resume-bot` | `/` (корень) | `railway up --detach` |
+| `admin-web` | `/admin` | `cd admin && railway up --detach` |
+
+### Переключение между сервисами
 
 ```bash
-# Деплой бэкенда
+# Посмотреть текущий сервис
+railway status
+
+# Переключиться на другой сервис (интерактивно)
+railway link
+
+# Или указать сервис явно
+railway link -s resume-bot
+railway link -s admin-web
+```
+
+### Полезные команды
+
+```bash
+# Деплой бэкенда (из корня проекта)
 railway up --detach
 
 # Деплой админки
 cd admin && railway up --detach
 
-# Логи
+# Логи (текущего сервиса)
 railway logs
 
-# Переменные
+# Логи в реальном времени
+railway logs -f
+
+# Переменные окружения
 railway variables
 
-# Подключение к БД (через Railway CLI)
-railway run psql $DATABASE_URL
+# Перезапуск сервиса
+railway redeploy
 ```
+
+---
+
+## База данных: Миграции
+
+**ВАЖНО:** Alembic НЕ используется. Изменения схемы — вручную!
+
+### Подключение к БД
+
+Внутренний URL (работает только внутри Railway):
+```
+postgresql://postgres:PASSWORD@postgres.railway.internal:5432/railway
+```
+
+Публичный URL (для подключения извне):
+```
+postgresql://postgres:PASSWORD@turntable.proxy.rlwy.net:42735/railway
+```
+
+**Чтобы получить публичный URL:**
+1. Railway Dashboard → PostgreSQL сервис
+2. Settings → Networking → Enable TCP Proxy
+3. Скопировать `turntable.proxy.rlwy.net:PORT`
+
+### Добавление колонки
+
+```bash
+# Через psql (если установлен)
+psql "postgresql://postgres:PASSWORD@turntable.proxy.rlwy.net:42735/railway" \
+  -c "ALTER TABLE users ADD COLUMN IF NOT EXISTS new_column TEXT;"
+
+# Через Python (если psql нет)
+python3 -c "
+import psycopg2
+conn = psycopg2.connect(
+    host='turntable.proxy.rlwy.net',
+    port=42735,
+    user='postgres',
+    password='PASSWORD',
+    database='railway'
+)
+cur = conn.cursor()
+cur.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS new_column TEXT;')
+conn.commit()
+print('Done!')
+"
+
+# Через brew libpq (macOS)
+/opt/homebrew/opt/libpq/bin/psql "postgresql://..." -c "ALTER TABLE..."
+```
+
+### Создание таблицы
+
+```bash
+psql "postgresql://..." -c "
+CREATE TABLE IF NOT EXISTS new_table (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);"
+```
+
+### Проверка структуры
+
+```bash
+# Список таблиц
+psql "postgresql://..." -c "\dt"
+
+# Структура таблицы
+psql "postgresql://..." -c "\d users"
+
+# Все колонки таблицы
+psql "postgresql://..." -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'users';"
+```
+
+### Текущая схема БД
+
+| Таблица | Колонки |
+|---------|---------|
+| `users` | id, telegram_id, username, first_name, is_admin, **interests**, created_at |
+| `channels` | id, username, title, last_post_id, is_active, created_at, last_checked_at |
+| `subscriptions` | id, user_id, channel_id, created_at |
+| `posts` | id, channel_id, post_id, content, summary, created_at |
+| `app_settings` | id, key, value, updated_at |
+| `userbot_sessions` | id, phone_number, session_string, is_authorized, is_active, phone_code_hash, created_at, last_used_at |
